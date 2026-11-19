@@ -26,3 +26,8 @@ Requires Linux, Node.js 20+, and zsign installed.
 npm install
 SITE_PASSWORD='a-long-random-password-here' npm start
 ```
+
+
+### Railway 빌드 오류 수정본
+이 버전은 zsign의 공식 Linux 빌드 방식에 맞춰 `build/linux`에서 `make`를 실행합니다.
+기존 GitHub 저장소에 이 ZIP의 파일을 덮어쓴 뒤 Railway에서 새 배포를 실행하세요.
