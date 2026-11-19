@@ -1,33 +1,20 @@
-# IPA Signer — Railway deployment
+# IPA Signer (Railway)
 
-A self-hosted IPA re-signing web app using the open-source zsign CLI.
+## Required variables
+- `SITE_PASSWORD`: at least 16 characters; Basic Auth password (username is `ipa`).
+- `PUBLIC_BASE_URL`: public HTTPS Railway URL, e.g. `https://your-service.up.railway.app`.
+  If `RAILWAY_PUBLIC_DOMAIN` is available, the app derives this automatically.
+
+## OTA installation
+After signing, open the site in Safari on the registered iPhone and tap **이 iPhone에 설치**.
+The app creates a short-lived (2-hour) random-token manifest and IPA URL. The OTA endpoints are
+intentionally exempt from Basic Auth because iOS installation cannot reliably authenticate
+against Basic Auth-protected manifest and IPA URLs. Treat generated install links as private.
+
+The device UDID must be included in the provisioning profile used for signing. The certificate,
+profile, app identifier, and entitlements must also match. The server cannot bypass Apple's
+provisioning requirements.
 
 ## Deploy
-1. Push this folder to a private GitHub repository.
-2. In Railway, create a project with **Deploy from GitHub Repo**.
-3. Railway builds the included Dockerfile and compiles zsign.
-4. Set the Railway variable `SITE_PASSWORD` to a long random value (at least 16 characters).
-5. Deploy, then open Settings → Networking → Generate Domain.
-6. Open the HTTPS domain. Basic Auth credentials: username `ipa`, password = `SITE_PASSWORD`.
-
-## Important
-- This is a starter implementation, not a security-audited signing service.
-- P12, profile, IPA and password are sent to your server.
-- zsign's CLI receives the P12 password as a process argument. Use only a trusted, isolated host; a hardened worker should avoid command-line password exposure.
-- Temporary files are deleted after each request, but abrupt termination can leave files behind.
-- Large IPAs require sufficient memory, CPU and temporary disk.
-- Signing can fail if certificate, provisioning profile, entitlements, bundle ID or device registration do not match.
-- Only sign apps and use certificates you are authorized to use.
-
-## Local run
-Requires Linux, Node.js 20+, and zsign installed.
-
-```sh
-npm install
-SITE_PASSWORD='a-long-random-password-here' npm start
-```
-
-
-### Railway 빌드 오류 수정본
-이 버전은 zsign의 공식 Linux 빌드 방식에 맞춰 `build/linux`에서 `make`를 실행합니다.
-기존 GitHub 저장소에 이 ZIP의 파일을 덮어쓴 뒤 Railway에서 새 배포를 실행하세요.
+Replace the files in the existing project with the matching paths, commit to GitHub, and redeploy
+on Railway. If using a repository subfolder, keep Railway Root Directory pointed at that folder.
