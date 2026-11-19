@@ -1,4 +1,61 @@
-<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b0d14"><title>IPA Signer</title><style>
-:root{color-scheme:dark;--bg:#0b0d14;--card:#151a27;--line:#293249;--muted:#9aa6bd;--text:#f5f7ff}*{box-sizing:border-box}body{margin:0;padding:28px 16px 50px;background:radial-gradient(ellipse at 50% -10%,#28365d 0,transparent 55%),var(--bg);color:var(--text);font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:650px;margin:auto}.brand{font-size:12px;letter-spacing:.2em;color:#aabaff;font-weight:800;margin:10px 0 20px}h1{font-size:clamp(34px,8vw,48px);letter-spacing:-.05em;margin:0 0 8px}.lead{color:var(--muted);line-height:1.65;margin:0 0 26px}.card{background:rgba(21,26,39,.96);border:1px solid var(--line);border-radius:24px;padding:22px;box-shadow:0 24px 70px #0005}.field{margin-bottom:19px}.field label{display:block;font-weight:700;font-size:14px;margin-bottom:9px}input{width:100%;background:#0d121d;border:1px solid var(--line);border-radius:12px;padding:13px;color:var(--text);font:inherit}input[type=file]{font-size:13px}input::file-selector-button{background:#293653;border:0;color:white;border-radius:8px;padding:9px;margin-right:10px}button{width:100%;border:0;border-radius:13px;padding:16px;background:linear-gradient(135deg,#b2c0ff,#8297ff);color:#101528;font-size:16px;font-weight:800}button:disabled{opacity:.5}.secondary{background:#293249;color:#eef1ff;margin-top:10px}.status{display:none;margin-top:17px;padding:14px;border:1px solid var(--line);background:#0d121d;border-radius:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}.note{font-size:12px;color:var(--muted);line-height:1.6;margin:15px 3px}.filemeta{font-size:12px;color:var(--muted);margin-top:6px}</style></head><body><main><div class="brand">PRIVATE SIGNING TOOL</div><h1>IPA Signer</h1><p class="lead">P12 인증서와 프로비저닝 프로파일을 사용해 IPA를 재서명합니다.</p><section class="card"><form id="form"><div class="field"><label for="ipa">01 · IPA 파일</label><input id="ipa" name="ipa" type="file" accept=".ipa" required><div class="filemeta" id="ipa-meta"></div></div><div class="field"><label for="p12">02 · P12 인증서</label><input id="p12" name="p12" type="file" accept=".p12,.pfx" required></div><div class="field"><label for="password">03 · P12 비밀번호</label><input id="password" name="password" type="password" autocomplete="off" required placeholder="인증서 비밀번호"></div><div class="field"><label for="mobileprovision">04 · MobileProvision</label><input id="mobileprovision" name="mobileprovision" type="file" accept=".mobileprovision" required></div><button id="submit" type="submit">서명 시작</button><button class="secondary" type="reset">초기화</button></form><div id="status" class="status" role="status"></div></section><p class="note">파일과 비밀번호는 서명 요청 시 서버로 전송됩니다. 본인이 신뢰하는 서버에서만 사용하세요. 인증서와 프로비저닝 프로파일의 유효성, 앱 권한 및 기기 등록 상태에 따라 서명이 실패할 수 있습니다.</p></main><script>
-const form=document.querySelector('#form'),btn=document.querySelector('#submit'),statusEl=document.querySelector('#status'),ipa=document.querySelector('#ipa');ipa.addEventListener('change',()=>{const f=ipa.files[0];document.querySelector('#ipa-meta').textContent=f?`${f.name} · ${(f.size/1024/1024).toFixed(1)} MB`:''});form.addEventListener('submit',async e=>{e.preventDefault();btn.disabled=true;btn.textContent='서명 중…';statusEl.style.display='block';statusEl.textContent='파일 업로드 및 서명 중입니다. 창을 닫지 마세요.';try{const r=await fetch('/api/sign',{method:'POST',body:new FormData(form)});if(!r.ok){let msg='서명에 실패했습니다.';try{msg=(await r.json()).error||msg}catch{}throw Error(msg)}const blob=await r.blob();if(blob.size<1000)throw Error('서명 결과 파일이 비정상적으로 작습니다.');const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='signed.ipa';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);statusEl.textContent='서명 완료! signed.ipa 다운로드를 시작했습니다.'}catch(err){statusEl.textContent='오류: '+err.message}finally{btn.disabled=false;btn.textContent='서명 시작'}});form.addEventListener('reset',()=>{statusEl.style.display='none';document.querySelector('#ipa-meta').textContent=''});
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b0d14"><title>IPA Signer</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0d14;--card:#151a27;--line:#293249;--muted:#9aa6bd;--text:#f5f7ff}
+*{box-sizing:border-box}body{margin:0;padding:28px 16px 50px;background:radial-gradient(ellipse at 50% -10%,#28365d 0,transparent 55%),var(--bg);color:var(--text);font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:650px;margin:auto}.brand{font-size:12px;letter-spacing:.2em;color:#aabaff;font-weight:800;margin:10px 0 20px}
+h1{font-size:clamp(34px,8vw,48px);letter-spacing:-.05em;margin:0 0 8px}.lead{color:var(--muted);line-height:1.65;margin:0 0 26px}
+.card{background:rgba(21,26,39,.96);border:1px solid var(--line);border-radius:24px;padding:22px;box-shadow:0 24px 70px #0005}
+.field{margin-bottom:19px}.field label{display:block;font-weight:700;font-size:14px;margin-bottom:9px}
+input{width:100%;background:#0d121d;border:1px solid var(--line);border-radius:12px;padding:13px;color:var(--text);font:inherit}
+input[type=file]{font-size:13px}input::file-selector-button{background:#293653;border:0;color:white;border-radius:8px;padding:9px;margin-right:10px}
+button,.action{display:block;width:100%;text-align:center;text-decoration:none;border:0;border-radius:13px;padding:16px;background:linear-gradient(135deg,#b2c0ff,#8297ff);color:#101528;font-size:16px;font-weight:800}
+button:disabled{opacity:.5}.secondary{background:#293249;color:#eef1ff;margin-top:10px}
+.status{display:none;margin-top:17px;padding:14px;border:1px solid var(--line);background:#0d121d;border-radius:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.note{font-size:12px;color:var(--muted);line-height:1.6;margin:15px 3px}.filemeta{font-size:12px;color:var(--muted);margin-top:6px}
+.results{display:none;margin-top:16px;padding:16px;border:1px solid #3a536e;background:#101c2a;border-radius:16px}.results h2{font-size:19px;margin:0 0 8px}.results p{font-size:13px;color:var(--muted);line-height:1.6;overflow-wrap:anywhere}
+.results .action{margin-top:10px}.results .download{background:#293249;color:#eef1ff}
+</style></head>
+<body><main>
+<div class="brand">PRIVATE SIGNING TOOL</div><h1>IPA Signer</h1>
+<p class="lead">P12 인증서와 프로비저닝 프로파일로 IPA를 재서명하고, 아이폰에 바로 설치합니다.</p>
+<section class="card">
+<form id="form">
+<div class="field"><label for="ipa">01 · IPA 파일</label><input id="ipa" name="ipa" type="file" accept=".ipa" required><div class="filemeta" id="ipa-meta"></div></div>
+<div class="field"><label for="p12">02 · P12 인증서</label><input id="p12" name="p12" type="file" accept=".p12,.pfx" required></div>
+<div class="field"><label for="password">03 · P12 비밀번호</label><input id="password" name="password" type="password" autocomplete="off" required placeholder="인증서 비밀번호"></div>
+<div class="field"><label for="mobileprovision">04 · MobileProvision</label><input id="mobileprovision" name="mobileprovision" type="file" accept=".mobileprovision" required></div>
+<button id="submit" type="submit">서명하고 설치 준비</button>
+<button class="secondary" type="reset">초기화</button>
+</form>
+<div id="status" class="status" role="status"></div>
+<div id="results" class="results">
+<h2 id="app-title">서명 완료</h2><p id="app-meta"></p>
+<a id="install-link" class="action" href="#">이 iPhone에 설치</a>
+<a id="download-link" class="action download" href="#">signed.ipa 다운로드</a>
+<p>설치 버튼을 누르면 iOS 설치 확인 창이 열립니다. 설치가 안 되면 Safari에서 이 페이지를 열고 다시 시도하세요.</p>
+</div>
+</section>
+<p class="note">IPA, P12, MobileProvision 파일과 P12 비밀번호는 서명 요청 시 서버로 전송됩니다. 설치 링크는 2시간 후 만료됩니다. 기기가 프로비저닝 프로파일에 등록되어 있고 인증서·프로파일이 유효해야 설치할 수 있습니다.</p>
+</main>
+<script>
+const form=document.querySelector('#form'),btn=document.querySelector('#submit'),statusEl=document.querySelector('#status'),ipa=document.querySelector('#ipa'),results=document.querySelector('#results');
+ipa.addEventListener('change',()=>{const f=ipa.files[0];document.querySelector('#ipa-meta').textContent=f?`${f.name} · ${(f.size/1024/1024).toFixed(1)} MB`:''});
+form.addEventListener('submit',async e=>{
+ e.preventDefault();btn.disabled=true;btn.textContent='서명 중…';results.style.display='none';statusEl.style.display='block';statusEl.textContent='업로드 및 재서명 중입니다. 창을 닫지 마세요.';
+ try{
+  const response=await fetch('/api/sign',{method:'POST',body:new FormData(form)});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||'서명에 실패했습니다.');
+  document.querySelector('#app-title').textContent=data.title+' · 서명 완료';
+  document.querySelector('#app-meta').textContent=`Bundle ID: ${data.bundleId}\n버전: ${data.version}\n설치 링크 유효시간: 2시간`;
+  document.querySelector('#install-link').href=data.installUrl;
+  document.querySelector('#download-link').href=data.downloadUrl;
+  results.style.display='block';statusEl.textContent='서명 완료! 아래의 “이 iPhone에 설치”를 눌러 설치하세요.';
+ }catch(error){statusEl.textContent='오류: '+error.message}
+ finally{btn.disabled=false;btn.textContent='서명하고 설치 준비'}
+});
+form.addEventListener('reset',()=>{statusEl.style.display='none';results.style.display='none';document.querySelector('#ipa-meta').textContent=''});
 </script></body></html>
