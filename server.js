@@ -28,8 +28,6 @@ if (!PUBLIC_BASE_URL) {
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
-// iOS OTA installer cannot complete Basic Auth challenges for manifest/IPA URLs.
-// These URLs use long random, short-lived tokens instead.
 app.use((req, res, next) => {
   if (req.path === '/health' || req.path.startsWith('/ota/')) return next();
   const header = req.headers.authorization || '';
@@ -66,7 +64,7 @@ function run(command, args, timeoutMs = 12 * 60 * 1000) {
     child.stderr.on('data', chunk => { stderr = append(stderr, chunk); });
     const timer = setTimeout(() => {
       child.kill('SIGKILL');
-      reject(new Error('Signing or metadata extraction timed out'));
+      reject(new Error(`${command} timed out`));
     }, timeoutMs);
     child.on('error', error => { clearTimeout(timer); reject(error); });
     child.on('close', code => {
@@ -76,29 +74,74 @@ function run(command, args, timeoutMs = 12 * 60 * 1000) {
     });
   });
 }
+
+// Stream binary stdout directly to disk. Never convert a binary plist to UTF-8 text.
+function runToFile(command, args, outputPath, timeoutMs = 60000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const output = fs.createWriteStream(outputPath, { mode: 0o600 });
+    let stderr = '';
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    child.stdout.pipe(output);
+    child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-5000); });
+    output.on('error', error => { child.kill('SIGKILL'); finish(error); });
+    child.on('error', error => finish(error));
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(new Error(`${command} timed out`));
+    }, timeoutMs);
+    child.on('close', code => {
+      output.end(() => {
+        if (code === 0) finish();
+        else finish(new Error((stderr || `${command} exit ${code}`).slice(-3000)));
+      });
+    });
+  });
+}
+
 function xmlEscape(value) {
   return String(value ?? '').replace(/[<>&'"]/g, char => ({
     '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;'
   }[char]));
 }
+
 async function readAppInfo(ipaPath, workDir) {
   const listing = await run('unzip', ['-Z1', ipaPath], 60000);
-  const infoPath = listing.stdout.split(/\r?\n/).find(name => /^Payload\/[^/]+\.app\/Info\.plist$/.test(name));
-  if (!infoPath) throw new Error('IPA 안에서 Payload/*.app/Info.plist를 찾지 못했습니다.');
-  const rawPath = path.join(workDir, 'Info.plist');
-  const xmlPath = path.join(workDir, 'Info.xml');
-  const extracted = await run('unzip', ['-p', ipaPath, infoPath], 60000);
-  fs.writeFileSync(rawPath, Buffer.from(extracted.stdout, 'binary'));
-  await run('plistutil', ['-i', rawPath, '-o', xmlPath, '-f', 'xml'], 60000);
-  const info = plist.parse(fs.readFileSync(xmlPath, 'utf8'));
+  const entries = listing.stdout.split(/\r?\n/).filter(Boolean);
+  const infoPath = entries.find(name => /^Payload\/[^/]+\.app\/Info\.plist$/.test(name));
+  if (!infoPath) {
+    const apps = entries.filter(name => /^Payload\/[^/]+\.app\//.test(name));
+    throw new Error(apps.length
+      ? '앱 폴더는 있지만 Info.plist를 찾지 못했습니다.'
+      : 'IPA 내부에서 Payload/*.app/Info.plist를 찾지 못했습니다. 올바른 iOS IPA인지 확인해 주세요.');
+  }
+
+  const binaryPlistPath = path.join(workDir, 'Info.binary.plist');
+  const xmlPlistPath = path.join(workDir, 'Info.xml');
+  await runToFile('unzip', ['-p', ipaPath, infoPath], binaryPlistPath, 60000);
+
+  // plistutil converts both Apple's binary plist and XML plist to XML.
+  await run('plistutil', ['-i', binaryPlistPath, '-o', xmlPlistPath, '-f', 'xml'], 60000);
+  const info = plist.parse(fs.readFileSync(xmlPlistPath, 'utf8'));
   const bundleId = info.CFBundleIdentifier;
-  if (!bundleId) throw new Error('앱의 CFBundleIdentifier를 읽을 수 없습니다.');
+
+  if (typeof bundleId !== 'string' || !bundleId.trim()) {
+    throw new Error('Info.plist는 읽었지만 CFBundleIdentifier 키가 없거나 비어 있습니다.');
+  }
   return {
-    bundleId,
+    bundleId: bundleId.trim(),
     title: info.CFBundleDisplayName || info.CFBundleName || bundleId,
     version: info.CFBundleShortVersionString || info.CFBundleVersion || '1.0'
   };
 }
+
 app.get('/health', (req, res) => {
   const ok = fs.existsSync(ZSIGN);
   res.status(ok ? 200 : 503).json({ ok, signingEngine: ok ? 'present' : 'missing' });
@@ -110,9 +153,10 @@ app.get('/ota/manifest/:token.plist', (req, res) => {
   const ipaUrl = `${PUBLIC_BASE_URL}/ota/ipa/${req.params.token}.ipa`;
   const manifest = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>${xmlEscape(ipaUrl)}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${xmlEscape(item.bundleId)}</string><key>bundle-version</key><string>${xmlEscape(item.version)}</string><key>kind</key><string>software</string><key>title</key><string>${xmlEscape(item.title)}</string></dict></dict></array></dict></plist>`;
+<plist version="1.0"><dict><key>items</key><array><dict><key>assets</key><array><dict><key>kind</key><string>software-package</string><key>url</key><string>${xmlEscape(ipaUrl)}</string></dict></array><key>metadata</key><dict><key>bundle-identifier</key><string>${xmlEscape(item.bundleId)}</string><key>bundle-version</key><string>${xmlEscape(item.version)}</string><key>kind</key><string>software</string><key>title</key><string>${xmlEscape(item.title)}</string></dict></array></dict></plist>`;
   res.type('application/xml').send(manifest);
 });
+
 app.get('/ota/ipa/:token.ipa', (req, res) => {
   const item = otaFiles.get(req.params.token);
   if (!item || item.expiresAt < Date.now()) return res.status(404).send('Install link expired');
@@ -146,6 +190,7 @@ app.post('/api/sign', upload.fields([
     if (!fs.existsSync(signedIpa) || fs.statSync(signedIpa).size < 1000) {
       throw new Error('zsign이 유효한 출력 IPA를 생성하지 않았습니다.');
     }
+
     const metadata = await readAppInfo(signedIpa, workDir);
     const token = crypto.randomBytes(32).toString('hex');
     const savedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ipa-ota-'));
@@ -153,7 +198,9 @@ app.post('/api/sign', upload.fields([
     const savedIpa = path.join(savedDir, 'signed.ipa');
     fs.copyFileSync(signedIpa, savedIpa);
     otaFiles.set(token, { ...metadata, ipaPath: savedIpa, savedDir, expiresAt: Date.now() + OTA_TTL_MS });
-    const installUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(`${PUBLIC_BASE_URL}/ota/manifest/${token}.plist`)}`;
+
+    const manifestUrl = `${PUBLIC_BASE_URL}/ota/manifest/${token}.plist`;
+    const installUrl = `itms-services://?action=download-manifest&url=${encodeURIComponent(manifestUrl)}`;
     res.json({
       ok: true,
       title: metadata.title,
